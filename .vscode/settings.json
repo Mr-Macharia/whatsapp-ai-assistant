@@ -1,0 +1,5 @@
+{
+    "editor.semanticHighlighting.enabled": true,
+    "python.analysis.typeCheckingMode": "basic",
+    "python.analysis.diagnosticMode": "workspace"
+}

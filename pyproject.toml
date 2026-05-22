@@ -1,0 +1,9 @@
+[project]
+name = "whatsapp-agent"
+version = "0.1.0"
+description = "A  WhatsApp AI Assistant built using Agno, Evolution API, and Composio for Auth plus Tools."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "sqlalchemy>=2.0.49",
+]
