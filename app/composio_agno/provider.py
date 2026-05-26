@@ -70,7 +70,8 @@ class AgnoProvider(AgenticProvider[Callable, AgnoToolCollection], name="agno"):
         def execute_wrapper(**kwargs: Any) -> Dict[str, Any]:
             result = execute_tool(tool.slug, kwargs)
             if not result.get("successful", False):
-                raise Exception(result.get("error", "Tool execution failed"))
+                # Return the error to the agent instead of crashing the app
+                return {"error": result.get("error", "Tool execution failed"), "status": "failed"}
             return result.get("data", {})
 
         # 4. Attach metadata
