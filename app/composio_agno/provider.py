@@ -42,7 +42,20 @@ class AgnoProvider(AgenticProvider[Callable, AgnoToolCollection], name="agno"):
         required_params: List[str] = tool.input_parameters.get("required", [])
 
         for param_name, param_info in properties.items():
-            param_type = _TYPE_MAPPING.get(param_info.get("type", "string"), Any)
+            param_type_str = param_info.get("type", "string")
+            if param_type_str == "array":
+                items_info = param_info.get("items", {})
+                if isinstance(items_info, dict):
+                    items_type_str = items_info.get("type", "string")
+                    items_type = _TYPE_MAPPING.get(items_type_str, str)
+                else:
+                    items_type = str
+                param_type = list[items_type]
+            elif param_type_str == "object":
+                param_type = dict
+            else:
+                param_type = _TYPE_MAPPING.get(param_type_str, Any)
+
             is_required = param_name in required_params
             default_value = inspect.Parameter.empty if is_required else param_info.get("default", None)
 

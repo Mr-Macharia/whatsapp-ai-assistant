@@ -5,13 +5,19 @@ import os
 
 load_dotenv()
 
-user_id = os.getenv("COMPOSIO_USER_ID")
-if not user_id:
-    raise ValueError("COMPOSIO_USER_ID not found in .env file.")
+gichogu_api_key = os.getenv("COMPOSIO_GICHOGU")
 
-composio_client = Composio(provider=AgnoProvider())
+rachael_api_key = os.getenv("COMPOSIO_RACHAEL") 
 
-session = composio_client.create(user_id=user_id)
+gichogu_composio_client = Composio(api_key=gichogu_api_key, provider=AgnoProvider())
+
+rachael_composio_client = Composio(api_key=rachael_api_key, provider=AgnoProvider())
+
+gichogu_session = gichogu_composio_client.create(user_id="gichogu-agent")
+
+rachael_session = rachael_composio_client.create(user_id="rachael-agent")
 
 
-composio_tools = session.tools()
+gichogu_composio_tools = gichogu_session.tools()
+
+rachael_composio_tools = rachael_session.tools()

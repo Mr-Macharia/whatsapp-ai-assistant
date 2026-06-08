@@ -1,18 +1,32 @@
 import logging
-from fastapi import FastAPI, Request, Response, BackgroundTasks
+from fastapi import Request, Response, BackgroundTasks
 from fastapi.responses import JSONResponse
-
+from app.db import whatsapp_db
+from agno.os import AgentOS
 from app.config import settings
-from app.agent import whatsapp_agent
+from app.gichogu_agent import gichogu_agent
+from app.rachael_agent import rachael_agent
 from app.tools.whatsapp import _evo_send_text
+
+AGENT_ROUTER = {
+    settings.GICHOGU_NUMBER: gichogu_agent,
+    settings.RACHAEL_NUMBER: rachael_agent,
+}
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s – %(message)s",
 )
-log = logging.getLogger("whatsapp-agent")
+log = logging.getLogger("agents")
 
-app = FastAPI(title="WhatsApp Agent", version="1.0.0")
+# Use AgentOS to wrap the FastAPI app so that WebSocket connections to /workflows/ws (e.g. from Agno Playground) are handled correctly
+app = AgentOS(
+    agents=[gichogu_agent, rachael_agent],
+    db=whatsapp_db,
+    scheduler=True,
+    scheduler_base_url=settings.SERVER_URL,
+    scheduler_poll_interval=15,
+).get_app()
 
 def _extract_text(message: dict) -> str | None:
     """Extract plain text from an Evolution API message object."""
@@ -57,9 +71,12 @@ async def webhook_verify():
 async def process_message(text: str, sender_number: str, sender_jid: str, push_name: str):
     log.info("Message from %s (%s): %s", push_name, sender_jid, text[:120])
 
+    agent = AGENT_ROUTER.get(sender_number)
+
     try:
-        response = await whatsapp_agent.arun(
+        response = await agent.arun(
             text,
+            session_id=sender_number,
             user_id=sender_number,
         )
         reply_text: str = response.content if response and response.content else ""
@@ -79,6 +96,27 @@ async def process_message(text: str, sender_number: str, sender_jid: str, push_n
     else:
         log.error("Failed to send reply to %s: %s", sender_jid, result.get("error"))
 
+@app.post("/internal/reminders")
+async def trigger_scheduled_reminder(request: Request):
+    """Secure endpoint triggered by the Agno ScheduleManager"""
+    
+    # 1. Security Check: Reject unauthorized triggers
+    if request.headers.get("apikey") != settings.WEBHOOK_SECRET:
+        log.error("Unauthorized attempt to trigger a reminder!")
+        return Response(status_code=403, content="Unauthorized")
+
+    # 2. Parse the payload the Agent created
+    payload = await request.json()
+    user_id = payload.get("user_id")
+    message = payload.get("message")
+    
+    # 3. Push to WhatsApp
+    if user_id and message:
+        _evo_send_text(to=user_id, text=message)
+        log.info(f"Fired scheduled reminder to {user_id}")
+        return JSONResponse({"status": "success", "delivered_to": user_id})
+    
+    return JSONResponse({"status": "failed", "reason": "missing payload data"}, status_code=400)
 
 @app.post("/webhook/whatsapp")
 async def webhook_receive(request: Request, background_tasks: BackgroundTasks):
@@ -110,8 +148,8 @@ async def webhook_receive(request: Request, background_tasks: BackgroundTasks):
     if sender_jid is None:
         return JSONResponse({"status": "ignored", "reason": "fromMe=true"})
 
-    if settings.ALLOWED_NUMBER and sender_number != settings.ALLOWED_NUMBER:
-        log.info("Ignoring message from %s / %s (not allowed)", sender_jid, sender_number)
+    if settings.ALLOWED_NUMBERS and sender_number not in settings.ALLOWED_NUMBERS:
+        log.info("Ignoring message from %s / %s (not allowed)", sender_number)
         return JSONResponse({"status": "ignored", "reason": "not allowed"})
 
     message_obj: dict = data.get("message", {})
