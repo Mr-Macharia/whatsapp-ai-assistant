@@ -5,13 +5,13 @@ from app.tools.composio import rachael_composio_tools
 from app.tools.search import brave_tools
 from app.tools.memory import memory_manager
 from app.prompts import rachael_instructions
-from app.tools.automations import scheduler_tools
+from app.tools.automations import rachael_scheduler
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
-tools = [*rachael_composio_tools, brave_tools, scheduler_tools]
+tools = [*rachael_composio_tools, brave_tools, rachael_scheduler]
 
 
 rachael_agent = Agent(

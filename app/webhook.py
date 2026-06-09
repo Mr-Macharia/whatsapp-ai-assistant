@@ -96,27 +96,74 @@ async def process_message(text: str, sender_number: str, sender_jid: str, push_n
     else:
         log.error("Failed to send reply to %s: %s", sender_jid, result.get("error"))
 
-@app.post("/internal/reminders")
-async def trigger_scheduled_reminder(request: Request):
-    """Secure endpoint triggered by the Agno ScheduleManager"""
-    
-    # 1. Security Check: Reject unauthorized triggers
-    if request.headers.get("apikey") != settings.WEBHOOK_SECRET:
-        log.error("Unauthorized attempt to trigger a reminder!")
+@app.post("/scheduled-run/{agent_id}")
+async def scheduled_run(agent_id: str, request: Request):
+    """Endpoint called by the Agno ScheduleManager when a schedule fires.
+
+    Runs the agent with the scheduled message and sends the response
+    back to the user on WhatsApp.
+    """
+    # Security: reject unauthorized triggers
+    auth_header = request.headers.get("Authorization", "")
+    api_key = request.headers.get("apikey", "")
+    if not auth_header and api_key != settings.WEBHOOK_SECRET:
+        log.error("Unauthorized attempt to trigger scheduled run for %s", agent_id)
         return Response(status_code=403, content="Unauthorized")
 
-    # 2. Parse the payload the Agent created
     payload = await request.json()
-    user_id = payload.get("user_id")
-    message = payload.get("message")
-    
-    # 3. Push to WhatsApp
-    if user_id and message:
-        _evo_send_text(to=user_id, text=message)
-        log.info(f"Fired scheduled reminder to {user_id}")
-        return JSONResponse({"status": "success", "delivered_to": user_id})
-    
-    return JSONResponse({"status": "failed", "reason": "missing payload data"}, status_code=400)
+    message = payload.get("message", "")
+
+    if not message:
+        return JSONResponse(
+            {"status": "failed", "reason": "missing 'message' in payload"},
+            status_code=400,
+        )
+
+    # Resolve which agent to run and the phone number to deliver to.
+    # Always use the phone number from AGENT_ROUTER (don't trust LLM-provided user_id).
+    agent = None
+    phone_number = None
+    for number, registered_agent in AGENT_ROUTER.items():
+        if registered_agent.id == agent_id or registered_agent.name == agent_id:
+            agent = registered_agent
+            phone_number = number
+            break
+
+    if agent is None:
+        log.error("No agent found for id=%s", agent_id)
+        return JSONResponse(
+            {"status": "failed", "reason": f"agent '{agent_id}' not found"},
+            status_code=404,
+        )
+
+    log.info("Scheduled run for agent=%s phone=%s message=%s", agent_id, phone_number, message[:120])
+
+    try:
+        response = await agent.arun(
+            message,
+            session_id=phone_number,
+            user_id=phone_number,
+        )
+        reply_text = response.content if response and response.content else ""
+    except Exception as e:
+        log.exception("Scheduled run error for agent=%s: %s", agent_id, e)
+        return JSONResponse(
+            {"status": "failed", "reason": str(e)},
+            status_code=500,
+        )
+
+    if reply_text and phone_number:
+        result = _evo_send_text(to=phone_number, text=reply_text)
+        if result.get("success"):
+            log.info("Scheduled run reply sent to %s", phone_number)
+        else:
+            log.error("Failed to send scheduled reply to %s: %s", phone_number, result.get("error"))
+
+    return JSONResponse({
+        "status": "success",
+        "delivered_to": phone_number,
+        "content": reply_text[:200] if reply_text else None,
+    })
 
 @app.post("/webhook/whatsapp")
 async def webhook_receive(request: Request, background_tasks: BackgroundTasks):
