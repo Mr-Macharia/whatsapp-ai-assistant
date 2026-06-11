@@ -1,4 +1,5 @@
 import requests
+import httpx
 from typing import Any, Dict, List, Optional
 
 from agno.tools import tool
@@ -39,6 +40,46 @@ def _evo_send_text(
         response.raise_for_status()
         return {"success": True, **response.json()}
     except requests.exceptions.HTTPError as e:
+        return {"success": False, "error": str(e), "response_text": e.response.text}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+async def _evo_send_text_async(
+    to: str,
+    text: str,
+    delay: int = 0,
+    link_preview: bool = True,
+    mentioned: Optional[List[str]] = None,
+    quoted: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Async version of _evo_send_text for use inside async route handlers
+    and background tasks — avoids blocking the event loop.
+    """
+    url = f"{settings.EVO_BASE_URL}/message/sendText/{settings.EVO_INSTANCE}"
+
+    payload: Dict[str, Any] = {"number": to, "text": text}
+    if delay:
+        payload["delay"] = delay
+    if not link_preview:
+        payload["linkPreview"] = link_preview
+    if mentioned:
+        payload["mentioned"] = mentioned
+    if quoted:
+        payload["quoted"] = quoted
+
+    headers = {
+        "apikey": settings.EVO_API_KEY,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            return {"success": True, **response.json()}
+    except httpx.HTTPStatusError as e:
         return {"success": False, "error": str(e), "response_text": e.response.text}
     except Exception as e:
         return {"success": False, "error": str(e)}

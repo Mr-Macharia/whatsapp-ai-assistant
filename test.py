@@ -3,14 +3,14 @@ from agno.os import AgentOS
 from agno.db.sqlite import SqliteDb
 from agno.models.google import Gemini
 import os
-from app.tools.composio import composio_tools
+from app.tools.composio import rachael_composio_tools
 from app.tools.search import brave_tools
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
-tools = [*composio_tools, brave_tools]
+tools = [*rachael_composio_tools, brave_tools]
 
 
 agent_db = SqliteDb(
@@ -22,8 +22,8 @@ test_agent = Agent(
     name="WhatsApp Assistant",
     model=Gemini(
         id="gemini-3.5-flash",
-        vertexai=True
     ),
+    learning=True,
     db=agent_db,
     tools=tools,
     instructions=[

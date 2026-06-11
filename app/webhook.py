@@ -6,7 +6,8 @@ from agno.os import AgentOS
 from app.config import settings
 from app.gichogu_agent import gichogu_agent
 from app.rachael_agent import rachael_agent
-from app.tools.whatsapp import _evo_send_text
+from app.prompts import get_rachael_instructions, get_gichogu_instructions
+from app.tools.whatsapp import _evo_send_text, _evo_send_text_async
 
 AGENT_ROUTER = {
     settings.GICHOGU_NUMBER: gichogu_agent,
@@ -73,6 +74,13 @@ async def process_message(text: str, sender_number: str, sender_jid: str, push_n
 
     agent = AGENT_ROUTER.get(sender_number)
 
+    # Stamp the real current Kenya time (EAT) into the instructions on every request.
+    # This ensures the correct time is used regardless of the server's deployment timezone.
+    if sender_number == settings.RACHAEL_NUMBER:
+        agent.instructions = get_rachael_instructions()
+    elif sender_number == settings.GICHOGU_NUMBER:
+        agent.instructions = get_gichogu_instructions()
+
     try:
         response = await agent.arun(
             text,
@@ -90,7 +98,7 @@ async def process_message(text: str, sender_number: str, sender_jid: str, push_n
 
     log.info("Replying to %s: %s", sender_jid, reply_text[:120])
 
-    result = _evo_send_text(to=sender_number, text=reply_text)
+    result = await _evo_send_text_async(to=sender_number, text=reply_text)
     if result.get("success"):
         log.info("Reply sent to %s", sender_jid)
     else:
@@ -138,9 +146,27 @@ async def scheduled_run(agent_id: str, request: Request):
 
     log.info("Scheduled run for agent=%s phone=%s message=%s", agent_id, phone_number, message[:120])
 
+    # Refresh instructions (including current EAT time) before running —
+    # mirrors the same stamp done in process_message for normal messages.
+    if phone_number == settings.GICHOGU_NUMBER:
+        agent.instructions = get_gichogu_instructions()
+    elif phone_number == settings.RACHAEL_NUMBER:
+        agent.instructions = get_rachael_instructions()
+
+    # Wrap the payload message with an execution directive so the agent
+    # performs the task rather than commenting on the schedule or its timing.
+    # Without this, the agent picks up the "schedule testing" tone from
+    # chat history and responds with celebration instead of actual output.
+    scheduled_prompt = (
+        f"[SCHEDULED TASK — execute autonomously]\n"
+        f"Do NOT comment on schedules, timing, or whether this worked. "
+        f"Simply perform the following task and deliver the result directly to the user:\n\n"
+        f"{message}"
+    )
+
     try:
         response = await agent.arun(
-            message,
+            scheduled_prompt,
             session_id=phone_number,
             user_id=phone_number,
         )
@@ -153,7 +179,7 @@ async def scheduled_run(agent_id: str, request: Request):
         )
 
     if reply_text and phone_number:
-        result = _evo_send_text(to=phone_number, text=reply_text)
+        result = await _evo_send_text_async(to=phone_number, text=reply_text)
         if result.get("success"):
             log.info("Scheduled run reply sent to %s", phone_number)
         else:

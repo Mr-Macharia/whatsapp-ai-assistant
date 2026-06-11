@@ -14,5 +14,7 @@ wheels/
 # Temporary and local DB files
 tmp/
 /ai_agent.py
-/prompts.py
+prompts.py
+
+
 
